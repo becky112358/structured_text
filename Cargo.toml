@@ -2,7 +2,10 @@
 name = "structured_text"
 version = "0.1.0"
 edition = "2021"
+description = "Structured Text"
+keywords = ["structured-text", "ST", "automotive"]
 license = "MIT"
 readme = "readme.md"
+repository = "https://github.com/becky112358/structured_text"
 
 [dependencies]
