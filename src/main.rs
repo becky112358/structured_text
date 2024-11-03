@@ -1,3 +1,3 @@
-fn main() {
-    println!("Hello, world!");
-}
+mod structured_text;
+
+fn main() {}
