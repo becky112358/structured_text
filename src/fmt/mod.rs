@@ -5,6 +5,7 @@ use std::str::FromStr;
 
 use super::{structured_text, visit_dirs};
 
+mod tab;
 mod trailing_whitespace;
 
 pub fn fmt() -> Result<()> {
@@ -18,6 +19,7 @@ fn fmt_file(path: &Path) -> Result<()> {
     let mut structured_text = structured_text::File::from_str(&file)?;
 
     structured_text.for_each_chunk(trailing_whitespace::trim)?;
+    structured_text.for_each_chunk(tab::replace_with_whitespace)?;
 
     fs::write(path, structured_text.to_string())?;
 
