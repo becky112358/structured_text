@@ -222,6 +222,18 @@ impl<'a> Iterator for FileIntoIter<'a> {
     }
 }
 
+impl File {
+    pub fn for_each_chunk(&mut self, cb: fn(&str) -> Result<String>) -> Result<()> {
+        let declaration = cb(&self.declaration)?;
+        self.declaration = declaration;
+        for chunk in self.chunks.iter_mut() {
+            let content = cb(&chunk.content)?;
+            chunk.content = content;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 #[path = "./test_structured_text.rs"]
 mod test_structured_text;
