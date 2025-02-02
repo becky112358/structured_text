@@ -1,0 +1,65 @@
+use std::fmt;
+
+pub const INDENT_WIDTH: u8 = 4;
+
+pub trait Dazzle {
+    fn dazzle(&self, dazzler: &mut Dazzler);
+}
+
+#[derive(Clone)]
+pub struct Dazzler {
+    pub f: String,
+    pub previous_character: PreviousCharacter,
+    pub indentation_count: u8,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum PreviousCharacter {
+    LineFeed,
+    PendingSpace,
+    Other,
+}
+
+impl Default for Dazzler {
+    fn default() -> Self {
+        Self {
+            f: String::new(),
+            previous_character: PreviousCharacter::LineFeed,
+            indentation_count: 0,
+        }
+    }
+}
+
+impl<D: fmt::Display> Dazzle for D {
+    fn dazzle(&self, dazzler: &mut Dazzler) {
+        dazzler.indent_or_space(false);
+        dazzler.f.push_str(&self.to_string());
+        dazzler.previous_character = PreviousCharacter::Other;
+    }
+}
+
+impl Dazzler {
+    pub fn indent_or_space(&mut self, finish_with_newline_or_space: bool) {
+        match self.previous_character {
+            PreviousCharacter::LineFeed => {
+                self.indent();
+            }
+            PreviousCharacter::PendingSpace => {
+                self.f.push(' ');
+                self.previous_character = PreviousCharacter::Other;
+            }
+            PreviousCharacter::Other => {
+                if finish_with_newline_or_space {
+                    self.f.push(' ');
+                }
+            }
+        }
+    }
+
+    pub fn indent(&mut self) {
+        for _ in 0..self.indentation_count {
+            self.f.push_str("    ");
+        }
+        self.previous_character = PreviousCharacter::Other;
+    }
+}
