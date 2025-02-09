@@ -1,9 +1,9 @@
 use std::io::Result;
 use std::str::FromStr;
 
-use crate::code::Declaration;
 use crate::components::{Component as C, Ether};
 use crate::dazzle::{self, Dazzle, PreviousCharacter};
+use crate::layout::Declaration;
 
 pub(super) fn align(input: &str) -> Result<String> {
     Ok(Declaration::from_str(input)?.make_pretty())
@@ -207,7 +207,9 @@ impl Dazzle for C {
         match self {
             C::Ether(inner) => inner.dazzle(arguments),
             C::Space => match arguments.previous_character {
-                PreviousCharacter::LineFeed | PreviousCharacter::PendingSpace => (),
+                PreviousCharacter::Top
+                | PreviousCharacter::LineFeed
+                | PreviousCharacter::PendingSpace => (),
                 PreviousCharacter::Other => {
                     arguments.previous_character = PreviousCharacter::PendingSpace
                 }

@@ -1,5 +1,6 @@
 use std::io::{Error, ErrorKind, Result};
 
+use crate::code::Code;
 use crate::dazzle::{self, Dazzle};
 
 use super::{Assignment, Ether, Identifier};
@@ -41,21 +42,21 @@ impl Dazzle for ValueInner {
 }
 
 impl Value {
-    pub fn peel(remainder: &mut String) -> Result<Self> {
-        Ok(Self(ValueInner::peel(remainder)?))
+    pub fn peel(code: &mut Code) -> Result<Self> {
+        Ok(Self(ValueInner::peel(code)?))
     }
 }
 
 impl ValueInner {
-    fn peel(remainder: &mut String) -> Result<Self> {
-        if let Ok(a) = Array::peel(remainder) {
+    fn peel(code: &mut Code) -> Result<Self> {
+        if let Ok(a) = Array::peel(code) {
             Ok(Self::Array(a))
-        } else if let Ok(s) = Struct::peel(remainder) {
+        } else if let Ok(s) = Struct::peel(code) {
             Ok(Self::Struct(s))
-        } else if remainder.starts_with("'") {
+        } else if let Ok(mut code_clone) = code.strip_prefix('\'') {
             let mut value = String::new();
             let mut escape = false;
-            for c in remainder.chars().skip(1) {
+            for c in code_clone.chars() {
                 if !escape && c == '\'' {
                     break;
                 } else if !escape && c == '$' {
@@ -67,12 +68,13 @@ impl ValueInner {
                     value.push(c);
                 }
             }
-            *remainder = remainder[value.len() + 2..].to_string();
+            code_clone.peel(value.len() + '\''.len_utf8())?;
+            *code = code_clone;
             Ok(Self::String(value))
         } else {
             let mut value = String::new();
             let mut array_accessor_count = 0;
-            for c in remainder.chars() {
+            for c in code.chars() {
                 if c.is_alphanumeric() || c == '_' || c == '-' || c == '#' || c == '.' {
                     value.push(c);
                 } else if c == '[' {
@@ -85,8 +87,7 @@ impl ValueInner {
                     break;
                 }
             }
-            *remainder = remainder[value.len()..].to_string();
-            value = value.to_string();
+            code.peel(value.len())?;
             Ok(Self::Flat(value))
         }
     }
@@ -127,39 +128,26 @@ impl Dazzle for Array {
 }
 
 impl Array {
-    fn peel(remainder: &mut String) -> Result<Self> {
-        if !remainder.starts_with('[') {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Does not start with '['\n{remainder}",
-            ));
-        }
-        let mut remainder_clone = remainder[1..].to_string();
+    fn peel(code: &mut Code) -> Result<Self> {
+        let mut code_clone = code.strip_prefix('[')?;
 
-        let ethers_start = Ether::peel(&mut remainder_clone)?;
+        let ethers_start = Ether::peel(&mut code_clone)?;
 
         let mut array = Vec::new();
         loop {
-            let member = Assignment::peel(&mut remainder_clone, ',', ']')?;
-            let mut ethers = Ether::peel(&mut remainder_clone)?;
-            if let Some(remainder_clone_stripped) = remainder_clone.strip_prefix(",") {
-                remainder_clone = remainder_clone_stripped.to_string();
-                ethers.extend(Ether::peel(&mut remainder_clone)?);
+            let member = Assignment::peel(&mut code_clone, ',', ']')?;
+            let mut ethers = Ether::peel(&mut code_clone)?;
+            if let Ok(code_clone_stripped) = code_clone.strip_prefix(',') {
+                code_clone = code_clone_stripped;
+                ethers.extend(Ether::peel(&mut code_clone)?);
                 array.push((member, ethers));
             } else {
                 array.push((member, ethers));
                 break;
             }
         }
-        if let Some(remainder_clone_stripped) = remainder_clone.strip_prefix("]") {
-            *remainder = remainder_clone_stripped.to_string();
-            Ok(Self(ethers_start, array))
-        } else {
-            Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Cannot find ']' \n{remainder}"),
-            ))
-        }
+        *code = code_clone.strip_prefix(']')?;
+        Ok(Self(ethers_start, array))
     }
 }
 
@@ -169,8 +157,12 @@ struct Struct(Vec<(Identifier, Assignment, Vec<Ether>)>);
 impl Dazzle for Struct {
     fn dazzle(&self, dazzler: &mut dazzle::Dazzler) {
         if self.dazzle_multiline(dazzler) {
-            if dazzler.previous_character != dazzle::PreviousCharacter::LineFeed {
-                dazzler.f.push('\n');
+            match dazzler.previous_character {
+                dazzle::PreviousCharacter::Top | dazzle::PreviousCharacter::LineFeed => (),
+                dazzle::PreviousCharacter::PendingSpace | dazzle::PreviousCharacter::Other => {
+                    dazzler.f.push('\n');
+                    dazzler.previous_character = dazzle::PreviousCharacter::LineFeed;
+                }
             }
             dazzler.indentation_count += 1;
             dazzler.indent();
@@ -308,48 +300,32 @@ impl Struct {
         max_width
     }
 
-    fn peel(remainder: &mut String) -> Result<Self> {
-        if !remainder.starts_with('(') {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Does not start with '('\n{remainder}",
-            ));
-        }
-        let mut remainder_clone = remainder[1..].trim_start().to_string();
+    fn peel(code: &mut Code) -> Result<Self> {
+        let mut code_clone = code.strip_prefix('(')?.trim_start();
         let mut values = Vec::new();
         loop {
-            let identifier = Identifier::peel(&mut remainder_clone)?;
-            if let Some(remainder_clone_stripped) = remainder_clone.trim_start().strip_prefix(":=")
-            {
-                remainder_clone = remainder_clone_stripped.trim_start().to_string();
-            } else {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Cannot find \":=\" \n{remainder}"),
-                ));
-            }
-            let assignment = Assignment::peel(&mut remainder_clone, ',', ')')?;
-            let mut ethers = Ether::peel(&mut remainder_clone)?;
-            if let Some(remainder_clone_stripped) = remainder_clone.trim_start().strip_prefix(',') {
-                remainder_clone = remainder_clone_stripped.trim_start().to_string();
-                ethers.extend(Ether::peel(&mut remainder_clone)?);
+            let identifier = Identifier::peel(&mut code_clone)?;
+            code_clone = code_clone.trim_start().strip_prefix_str(":=")?.trim_start();
+            let assignment = Assignment::peel(&mut code_clone, ',', ')')?;
+            let mut ethers = Ether::peel(&mut code_clone)?;
+            if let Ok(code_clone_stripped) = code_clone.trim_start().strip_prefix(',') {
+                code_clone = code_clone_stripped;
+                ethers.extend(Ether::peel(&mut code_clone)?);
                 values.push((identifier, assignment, ethers));
                 continue;
-            } else if let Some(remainder_clone_stripped) =
-                remainder_clone.trim_start().strip_prefix(')')
-            {
-                remainder_clone = remainder_clone_stripped.to_string();
-                ethers.extend(Ether::peel(&mut remainder_clone)?);
+            } else if let Ok(code_clone_stripped) = code_clone.trim_start().strip_prefix(')') {
+                code_clone = code_clone_stripped;
+                ethers.extend(Ether::peel(&mut code_clone)?);
                 values.push((identifier, assignment, ethers));
                 break;
             } else {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("Cannot parse struct value \n{remainder}"),
+                    format!("Cannot parse struct value \n{code}"),
                 ));
             }
         }
-        *remainder = remainder_clone.to_string();
+        *code = code_clone;
         Ok(Self(values))
     }
 }

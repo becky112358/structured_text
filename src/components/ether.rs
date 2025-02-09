@@ -1,5 +1,6 @@
-use std::io::{Error, ErrorKind, Result};
+use std::io::Result;
 
+use crate::code::Code;
 use crate::dazzle::{self, Dazzle, PreviousCharacter};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,8 +27,11 @@ impl Dazzle for Ether {
                 dazzler.previous_character = PreviousCharacter::LineFeed;
             }
             Self::PragmaOrComment(PragmaOrComment(PragmaOrCommentInner::Pragma(inner))) => {
-                if dazzler.previous_character != PreviousCharacter::LineFeed {
-                    dazzler.f.push('\n');
+                match dazzler.previous_character {
+                    PreviousCharacter::Top | PreviousCharacter::LineFeed => (),
+                    PreviousCharacter::PendingSpace | PreviousCharacter::Other => {
+                        dazzler.f.push('\n')
+                    }
                 }
                 dazzler.f.push_str(&format!("{{{inner}}}"));
                 dazzler.previous_character = PreviousCharacter::Other;
@@ -51,102 +55,59 @@ impl Dazzle for Ether {
 }
 
 impl Ether {
-    pub fn peel(remainder: &mut String) -> Result<Vec<Self>> {
+    pub fn peel(code: &mut Code) -> Result<Vec<Self>> {
         let mut pragmas_and_comments = Vec::new();
-        let mut remainder_clone = remainder.to_string();
-        peel_new_line(&mut pragmas_and_comments, &mut remainder_clone);
-        peel_new_line(&mut pragmas_and_comments, &mut remainder_clone);
-        remainder_clone = remainder_clone.trim_start().to_string();
-        while peel_single(&mut pragmas_and_comments, &mut remainder_clone)? {
-            peel_new_line(&mut pragmas_and_comments, &mut remainder_clone);
-            peel_new_line(&mut pragmas_and_comments, &mut remainder_clone);
-            remainder_clone = remainder_clone.trim_start().to_string();
+        let mut code_clone = code.clone();
+        peel_new_line(&mut pragmas_and_comments, &mut code_clone)?;
+        peel_new_line(&mut pragmas_and_comments, &mut code_clone)?;
+        code_clone = code_clone.trim_start();
+        while peel_single(&mut pragmas_and_comments, &mut code_clone)? {
+            peel_new_line(&mut pragmas_and_comments, &mut code_clone)?;
+            peel_new_line(&mut pragmas_and_comments, &mut code_clone)?;
+            code_clone = code_clone.trim_start();
         }
-        *remainder = remainder_clone;
+        *code = code_clone;
         Ok(pragmas_and_comments)
     }
 
-    pub fn then_comment(remainder: &str) -> bool {
-        remainder.trim().starts_with("//") || remainder.trim().starts_with("(*")
+    pub fn then_comment(code: &Code) -> bool {
+        code.trim_start().starts_with_str("//") || code.trim_start().starts_with_str("(*")
     }
 }
 
-fn peel_new_line(pragmas_and_comments: &mut Vec<Ether>, remainder: &mut String) -> bool {
-    match remainder.split_once('\n') {
-        Some((before, after)) => {
-            for c in before.chars() {
-                if !c.is_ascii_whitespace() {
-                    return false;
-                }
-            }
+fn peel_new_line(pragmas_and_comments: &mut Vec<Ether>, code: &mut Code) -> Result<()> {
+    let mut whitespace_length = 0;
+    for c in code.chars() {
+        if c == '\n' {
+            whitespace_length += '\n'.len_utf8();
+            code.peel(whitespace_length)?;
             pragmas_and_comments.push(Ether::LineFeed);
-            *remainder = after.to_string();
-            true
+            return Ok(());
+        } else if c.is_ascii_whitespace() {
+            whitespace_length += c.len_utf8();
+        } else {
+            return Ok(());
         }
-        None => false,
     }
+    Ok(())
 }
 
-fn peel_single(pragmas_and_comments: &mut Vec<Ether>, remainder: &mut String) -> Result<bool> {
-    if remainder.starts_with('{') {
-        let pragma_end = match remainder.find('}') {
-            Some(i) => i,
-            None => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Cannot find pragma end \n{remainder}"),
-                ))
-            }
-        };
-        let pragma_inner = remainder[1..pragma_end].trim().to_string();
-        if pragma_end == remainder.len() - 1 {
-            *remainder = String::new();
-        } else {
-            *remainder = remainder[pragma_end + 1..].to_string();
-        }
-
+fn peel_single(pragmas_and_comments: &mut Vec<Ether>, code: &mut Code) -> Result<bool> {
+    if let Ok(pragma) = code.strip_between_and_trim_inner("{", "}") {
         pragmas_and_comments.push(Ether::PragmaOrComment(PragmaOrComment(
-            PragmaOrCommentInner::Pragma(pragma_inner),
+            PragmaOrCommentInner::Pragma(pragma),
         )));
         return Ok(true);
     }
 
-    if remainder.starts_with("(*") {
-        let comment_end = match remainder.find("*)") {
-            Some(i) => i,
-            None => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Cannot find comment end \n{remainder}"),
-                ))
-            }
-        };
-        let comment_inner = remainder["(*".len()..comment_end].trim().to_string();
-        if comment_end == remainder.len() - "*)".len() {
-            *remainder = String::new();
-        } else {
-            *remainder = remainder[comment_end + "*)".len()..].to_string();
-        }
-
+    if let Ok(comment) = code.strip_between_and_trim_inner("(*", "*)") {
         pragmas_and_comments.push(Ether::PragmaOrComment(PragmaOrComment(
-            PragmaOrCommentInner::CommentMultiLine(comment_inner),
+            PragmaOrCommentInner::CommentMultiLine(comment),
         )));
         return Ok(true);
     }
 
-    if remainder.starts_with("//") {
-        let comment;
-        match remainder.find('\n') {
-            Some(i) => {
-                comment = remainder["//".len()..i].trim().to_string();
-                *remainder = remainder[i + 1..].to_string();
-            }
-            None => {
-                comment = remainder["//".len()..].trim().to_string();
-                *remainder = String::new();
-            }
-        };
-
+    if let Ok(comment) = code.strip_between_and_trim_inner("//", "\n") {
         pragmas_and_comments.push(Ether::PragmaOrComment(PragmaOrComment(
             PragmaOrCommentInner::CommentSingleLine(comment),
         )));

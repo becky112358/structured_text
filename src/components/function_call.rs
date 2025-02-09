@@ -1,5 +1,6 @@
-use std::io::{Error, ErrorKind, Result};
+use std::io::Result;
 
+use crate::code::Code;
 use crate::dazzle::{self, Dazzle};
 
 use super::{Assignment, Identifier, IdentifierSub};
@@ -14,8 +15,8 @@ impl Dazzle for FunctionCall {
 }
 
 impl FunctionCall {
-    pub fn peel(remainder: &mut String) -> Result<Self> {
-        Ok(Self(FunctionCallInner::peel(remainder)?))
+    pub fn peel(code: &mut Code) -> Result<Self> {
+        Ok(Self(FunctionCallInner::peel(code)?))
     }
 }
 
@@ -44,41 +45,25 @@ impl Dazzle for FunctionCallInner {
 }
 
 impl FunctionCallInner {
-    fn peel(remainder: &mut String) -> Result<Self> {
-        let mut remainder_clone = remainder.clone();
-        let identifier = IdentifierSub::peel(&mut remainder_clone)?;
-        let mut remainder_clone = match remainder_clone.strip_prefix('(') {
-            Some(remainder_clone_stripped) => remainder_clone_stripped.trim_start().to_string(),
-            None => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Cannot find '('\n{remainder}"),
-                ))
-            }
-        };
+    fn peel(code: &mut Code) -> Result<Self> {
+        let mut code_clone = code.clone();
+        let identifier = IdentifierSub::peel(&mut code_clone)?;
+        let mut code_clone = code_clone.strip_prefix('(')?;
 
         let mut arguments = Vec::new();
 
         loop {
-            let argument = Argument::peel(&mut remainder_clone)?;
+            let argument = Argument::peel(&mut code_clone)?;
             arguments.push(argument);
-            remainder_clone = match remainder_clone.trim_start().strip_prefix(',') {
-                Some(remainder_clone_stripped) => remainder_clone_stripped.trim_start().to_string(),
-                None => break,
+            code_clone = match code_clone.trim_start().strip_prefix(',') {
+                Ok(code_clone_stripped) => code_clone_stripped.trim_start(),
+                Err(_) => break,
             };
         }
 
-        remainder_clone = match remainder_clone.trim_start().strip_prefix(')') {
-            Some(remainder_clone_stripped) => remainder_clone_stripped.to_string(),
-            None => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Cannot find ')'\n{remainder}"),
-                ))
-            }
-        };
+        code_clone = code_clone.trim_start().strip_prefix(')')?;
 
-        *remainder = remainder_clone.to_string();
+        *code = code_clone;
         Ok(Self {
             identifier,
             arguments,
@@ -115,40 +100,34 @@ impl Dazzle for Argument {
 }
 
 impl Argument {
-    fn peel(remainder: &mut String) -> Result<Self> {
-        if let Ok((identifier, assignment)) = peel_identifier_and_assignment(remainder, ":=") {
+    fn peel(code: &mut Code) -> Result<Self> {
+        if let Ok((identifier, assignment)) = peel_identifier_and_assignment(code, ":=") {
             Ok(Self::InputOrInout(identifier, assignment))
-        } else if let Ok((identifier, assignment)) = peel_identifier_and_assignment(remainder, "=>")
-        {
+        } else if let Ok((identifier, assignment)) = peel_identifier_and_assignment(code, "=>") {
             Ok(Self::Output(identifier, assignment))
         } else {
-            Ok(Self::Unnamed(peel_assignment_only(remainder)?))
+            Ok(Self::Unnamed(peel_assignment_only(code)?))
         }
     }
 }
 
 fn peel_identifier_and_assignment(
-    remainder: &mut String,
+    code: &mut Code,
     separator: &str,
 ) -> Result<(Identifier, Assignment)> {
-    let mut remainder_clone = remainder.clone();
-    let identifier = Identifier::peel(&mut remainder_clone)?;
-    remainder_clone = match remainder_clone.trim_start().strip_prefix(separator) {
-        Some(remainder_clone_stripped) => remainder_clone_stripped.trim_start().to_string(),
-        None => {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Cannot find \"{separator}\"\n{remainder}"),
-            ))
-        }
-    };
-    let assignment = Assignment::peel(&mut remainder_clone, ',', ')')?;
-    *remainder = remainder_clone.to_string();
+    let mut code_clone = code.clone();
+    let identifier = Identifier::peel(&mut code_clone)?;
+    code_clone = code_clone
+        .trim_start()
+        .strip_prefix_str(separator)?
+        .trim_start();
+    let assignment = Assignment::peel(&mut code_clone, ',', ')')?;
+    *code = code_clone;
     Ok((identifier, assignment))
 }
 
-fn peel_assignment_only(remainder: &mut String) -> Result<Assignment> {
-    Assignment::peel(remainder, ',', ')')
+fn peel_assignment_only(code: &mut Code) -> Result<Assignment> {
+    Assignment::peel(code, ',', ')')
 }
 
 #[cfg(test)]

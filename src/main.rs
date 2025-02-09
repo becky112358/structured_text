@@ -6,6 +6,7 @@ mod code;
 mod components;
 mod dazzle;
 mod fmt;
+mod layout;
 mod structured_text;
 
 fn main() {

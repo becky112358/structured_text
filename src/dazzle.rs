@@ -15,6 +15,7 @@ pub struct Dazzler {
 
 #[derive(Clone, PartialEq)]
 pub enum PreviousCharacter {
+    Top,
     LineFeed,
     PendingSpace,
     Other,
@@ -24,7 +25,7 @@ impl Default for Dazzler {
     fn default() -> Self {
         Self {
             f: String::new(),
-            previous_character: PreviousCharacter::LineFeed,
+            previous_character: PreviousCharacter::Top,
             indentation_count: 0,
         }
     }
@@ -41,6 +42,7 @@ impl<D: fmt::Display> Dazzle for D {
 impl Dazzler {
     pub fn indent_or_space(&mut self, finish_with_newline_or_space: bool) {
         match self.previous_character {
+            PreviousCharacter::Top => (),
             PreviousCharacter::LineFeed => {
                 self.indent();
             }
