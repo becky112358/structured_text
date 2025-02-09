@@ -1,6 +1,7 @@
 use std::io::{Error, ErrorKind, Result};
 use std::str::FromStr;
 
+use crate::code::Code;
 use crate::components::{Component as C, Ether};
 use crate::layout::{string_and_format_get_items, Layout as L};
 
@@ -10,22 +11,24 @@ pub struct Declaration(pub Vec<C>);
 impl FromStr for Declaration {
     type Err = Error;
     fn from_str(input: &str) -> Result<Self> {
-        if let Ok(declaration) = string_and_layout_get_declaration(input, ENUM) {
+        let mut code = Code::from(input);
+
+        if let Ok(declaration) = string_and_layout_get_declaration(&mut code, ENUM) {
             Ok(declaration)
-        } else if let Ok(declaration) = string_and_layout_get_declaration(input, STRUCT) {
+        } else if let Ok(declaration) = string_and_layout_get_declaration(&mut code, STRUCT) {
             Ok(declaration)
-        } else if let Ok(declaration) = string_and_layout_get_declaration(input, UNION) {
+        } else if let Ok(declaration) = string_and_layout_get_declaration(&mut code, UNION) {
             Ok(declaration)
         } else if let Ok(declaration) =
-            string_and_layout_get_declaration(input, GLOBAL_VARIABLE_LIST)
+            string_and_layout_get_declaration(&mut code, GLOBAL_VARIABLE_LIST)
         {
             Ok(declaration)
         } else if let Ok(declaration) =
-            string_and_layout_get_declaration(input, PROGRAM_ORGANISATION_UNIT)
+            string_and_layout_get_declaration(&mut code, PROGRAM_ORGANISATION_UNIT)
         {
             Ok(declaration)
         } else if let Ok(declaration) =
-            string_and_layout_get_declaration(input, PROPERTY_GET_OR_SET)
+            string_and_layout_get_declaration(&mut code, PROPERTY_GET_OR_SET)
         {
             Ok(declaration)
         } else {
@@ -37,20 +40,19 @@ impl FromStr for Declaration {
     }
 }
 
-fn string_and_layout_get_declaration(input: &str, layout: &[L]) -> Result<Declaration> {
-    let mut remainder = input.to_string();
-    let mut items = string_and_format_get_items(&mut remainder, layout)?;
-    for ether in Ether::peel(&mut remainder)? {
+fn string_and_layout_get_declaration(code: &mut Code, layout: &[L]) -> Result<Declaration> {
+    let mut items = string_and_format_get_items(code, layout)?;
+    for ether in Ether::peel(code)? {
         items.push(C::Ether(ether));
     }
     let declaration = Declaration(items);
 
-    if remainder.is_empty() {
+    if code.end_of_file() {
         Ok(declaration)
     } else {
         Err(Error::new(
             ErrorKind::InvalidData,
-            format!("Cannot parse \n{remainder}"),
+            format!("Cannot parse \n{code}"),
         ))
     }
 }

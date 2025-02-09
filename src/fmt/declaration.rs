@@ -207,7 +207,9 @@ impl Dazzle for C {
         match self {
             C::Ether(inner) => inner.dazzle(arguments),
             C::Space => match arguments.previous_character {
-                PreviousCharacter::LineFeed | PreviousCharacter::PendingSpace => (),
+                PreviousCharacter::Top
+                | PreviousCharacter::LineFeed
+                | PreviousCharacter::PendingSpace => (),
                 PreviousCharacter::Other => {
                     arguments.previous_character = PreviousCharacter::PendingSpace
                 }

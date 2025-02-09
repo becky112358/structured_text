@@ -1,26 +1,27 @@
 use std::io::{Error, ErrorKind, Result};
 
+use crate::code::Code;
 use crate::components::{
     Address, Assignment, Component as C, DataType, Ether, Identifier, IdentifierSub, Value,
 };
 
-pub fn string_and_format_get_items(remainder: &mut String, layout: &[Layout]) -> Result<Vec<C>> {
+pub fn string_and_format_get_items(code: &mut Code, layout: &[Layout]) -> Result<Vec<C>> {
     let mut output = Vec::new();
 
     for l in layout {
-        let items = string_and_one_format_get_items(remainder, l)?;
+        let items = string_and_one_format_get_items(code, l)?;
         output.extend(items);
     }
 
     Ok(output)
 }
 
-fn string_and_one_format_get_items(remainder: &mut String, layout: &Layout) -> Result<Vec<C>> {
+fn string_and_one_format_get_items(code: &mut Code, layout: &Layout) -> Result<Vec<C>> {
     let mut output = Vec::new();
 
-    let mut remainder_clone = remainder.clone();
+    let mut code_clone = code.clone();
 
-    for ether in Ether::peel(&mut remainder_clone)? {
+    for ether in Ether::peel(&mut code_clone)? {
         output.push(C::Ether(ether));
     }
 
@@ -32,28 +33,26 @@ fn string_and_one_format_get_items(remainder: &mut String, layout: &Layout) -> R
             }
         }
         Layout::Uppercase(text) => {
-            output.push(C::Uppercase(peel_uppercase(&mut remainder_clone, text)?))
+            output.push(C::Uppercase(peel_uppercase(&mut code_clone, text)?))
         }
-        Layout::Text(text) => output.push(C::Text(peel(&mut remainder_clone, text)?)),
-        Layout::Identifier => output.push(C::Identifier(Identifier::peel(&mut remainder_clone)?)),
+        Layout::Text(text) => output.push(C::Text(peel(&mut code_clone, text)?)),
+        Layout::Identifier => output.push(C::Identifier(Identifier::peel(&mut code_clone)?)),
         Layout::IdentifierSub => {
-            output.push(C::IdentifierSub(IdentifierSub::peel(&mut remainder_clone)?))
+            output.push(C::IdentifierSub(IdentifierSub::peel(&mut code_clone)?))
         }
-        Layout::Address => output.push(C::Address(Address::peel(&mut remainder_clone)?)),
-        Layout::DataType => output.push(C::DataType(DataType::peel(&mut remainder_clone)?)),
-        Layout::Value => output.push(C::Value(Value::peel(&mut remainder_clone)?)),
-        Layout::Assignment => output.push(C::Assignment(Assignment::peel(
-            &mut remainder_clone,
-            ';',
-            ';',
-        )?)),
+        Layout::Address => output.push(C::Address(Address::peel(&mut code_clone)?)),
+        Layout::DataType => output.push(C::DataType(DataType::peel(&mut code_clone)?)),
+        Layout::Value => output.push(C::Value(Value::peel(&mut code_clone)?)),
+        Layout::Assignment => {
+            output.push(C::Assignment(Assignment::peel(&mut code_clone, ';', ';')?))
+        }
         Layout::OneOf(options) => {
             let mut found = false;
             for option in *options {
-                let mut remainder_clone_clone = remainder_clone.clone();
-                if let Ok(item) = string_and_format_get_items(&mut remainder_clone_clone, option) {
+                let mut code_clone_clone = code_clone.clone();
+                if let Ok(item) = string_and_format_get_items(&mut code_clone_clone, option) {
                     output.extend(item);
-                    remainder_clone = remainder_clone_clone;
+                    code_clone = code_clone_clone;
                     found = true;
                     break;
                 }
@@ -61,23 +60,23 @@ fn string_and_one_format_get_items(remainder: &mut String, layout: &Layout) -> R
             if !found {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("Cannot find any of \n{options:?} \n{remainder_clone}"),
+                    format!("Cannot find any of \n{options:?} \n{code_clone}"),
                 ));
             }
         }
         Layout::Option(inner) => {
-            if let Ok(items) = string_and_format_get_items(&mut remainder_clone, inner) {
+            if let Ok(items) = string_and_format_get_items(&mut code_clone, inner) {
                 output.extend(items);
             } else {
                 return Ok(Vec::new());
             }
         }
         Layout::BeginMiddleEnd(beginf, middlef, endf) => {
-            let mut begind = string_and_format_get_items(&mut remainder_clone, beginf)?;
+            let mut begind = string_and_format_get_items(&mut code_clone, beginf)?;
 
             let mut middled_start_ethers = Vec::new();
             let mut new_line = false;
-            for ether in Ether::peel(&mut remainder_clone)? {
+            for ether in Ether::peel(&mut code_clone)? {
                 if !new_line {
                     begind.push(C::Ether(ether.clone()));
                 } else {
@@ -92,24 +91,22 @@ fn string_and_one_format_get_items(remainder: &mut String, layout: &Layout) -> R
             }
 
             let mut middled = vec![middled_start_ethers];
-            let mut remainder_clone_clone = remainder_clone.clone();
-            while let Ok(mut items) =
-                string_and_format_get_items(&mut remainder_clone_clone, middlef)
-            {
-                for ether in Ether::peel(&mut remainder_clone_clone)? {
+            let mut code_clone_clone = code_clone.clone();
+            while let Ok(mut items) = string_and_format_get_items(&mut code_clone_clone, middlef) {
+                for ether in Ether::peel(&mut code_clone_clone)? {
                     items.push(C::Ether(ether));
                 }
                 if !matches!(items.last(), Some(C::Ether(Ether::LineFeed))) {
                     items.push(C::Ether(Ether::LineFeed));
                 }
                 middled.push(items);
-                remainder_clone = remainder_clone_clone.clone();
+                code_clone = code_clone_clone.clone();
             }
 
-            let mut endd = string_and_format_get_items(&mut remainder_clone, endf)?;
+            let mut endd = string_and_format_get_items(&mut code_clone, endf)?;
             let mut output_after_ethers = Vec::new();
             let mut new_line = false;
-            for ether in Ether::peel(&mut remainder_clone)? {
+            for ether in Ether::peel(&mut code_clone)? {
                 if !new_line {
                     endd.push(C::Ether(ether.clone()));
                 } else {
@@ -127,10 +124,10 @@ fn string_and_one_format_get_items(remainder: &mut String, layout: &Layout) -> R
         }
         Layout::Repeat(inner) => {
             let mut found = false;
-            let mut remainder_clone_clone = remainder_clone.clone();
-            while let Ok(items) = string_and_format_get_items(&mut remainder_clone_clone, inner) {
+            let mut code_clone_clone = code_clone.clone();
+            while let Ok(items) = string_and_format_get_items(&mut code_clone_clone, inner) {
                 output.push(C::Repeat(items));
-                remainder_clone = remainder_clone_clone.clone();
+                code_clone = code_clone_clone.clone();
                 found = true;
             }
             if !found {
@@ -139,7 +136,7 @@ fn string_and_one_format_get_items(remainder: &mut String, layout: &Layout) -> R
         }
     }
 
-    *remainder = remainder_clone;
+    *code = code_clone;
 
     Ok(output)
 }
@@ -162,26 +159,12 @@ pub enum Layout {
     Repeat(&'static [Layout]),
 }
 
-fn peel<'a>(remainder: &mut String, text: &'a str) -> Result<&'a str> {
-    if let Some(remainder_stripped) = remainder.strip_prefix(text) {
-        *remainder = remainder_stripped.to_string();
-        Ok(text)
-    } else {
-        Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Cannot find {text} in \n{remainder}"),
-        ))
-    }
+fn peel<'a>(code: &mut Code, text: &'a str) -> Result<&'a str> {
+    *code = code.strip_prefix_str(text)?;
+    Ok(text)
 }
 
-fn peel_uppercase<'a>(remainder: &mut String, text: &'a str) -> Result<&'a str> {
-    if remainder.to_uppercase().starts_with(text) {
-        *remainder = remainder[text.len()..].to_string();
-        Ok(text)
-    } else {
-        Err(Error::new(
-            ErrorKind::InvalidData,
-            format!("Cannot find {text} (case-insensitive) in \n{remainder}"),
-        ))
-    }
+fn peel_uppercase<'a>(code: &mut Code, text: &'a str) -> Result<&'a str> {
+    *code = code.strip_prefix_uppercase(text)?;
+    Ok(text)
 }

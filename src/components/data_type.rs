@@ -2,6 +2,8 @@ use std::fmt;
 use std::io::{Error, ErrorKind, Result};
 use std::str::FromStr;
 
+use crate::code::Code;
+
 use super::Identifier;
 
 #[derive(Debug, PartialEq)]
@@ -52,59 +54,26 @@ impl fmt::Display for DataType {
 }
 
 impl DataType {
-    pub fn peel(remainder: &mut String) -> Result<Self> {
-        if let Ok(array) = Self::peel_array(remainder) {
+    pub fn peel(code: &mut Code) -> Result<Self> {
+        if let Ok(array) = Self::peel_array(code) {
             Ok(array)
-        } else if remainder.to_uppercase().starts_with("STRING") {
-            if !remainder["STRING".len()..].trim().starts_with("(") {
-                *remainder = remainder["STRING".len()..].to_string();
-                return Ok(Self::String(None));
-            }
-
-            let length_start = match remainder.find("(") {
-                Some(i) => i,
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Lost the '('!\n{remainder}"),
-                    ))
-                }
-            };
-            let length_stop = match remainder.find(")") {
-                Some(i) => i,
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Cannot find ')'\n{remainder}"),
-                    ))
-                }
-            };
-            let length = match u16::from_str(remainder[length_start + 1..length_stop].trim()) {
-                Ok(i) => i,
-                Err(_) => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Cannot parse STRING length\n{remainder}"),
-                    ))
-                }
-            };
-            *remainder = remainder[length_stop + 1..].to_string();
-            Ok(Self::String(Some(length)))
-        } else if remainder.to_uppercase().starts_with("REFERENCE TO") {
-            let mut remainder_clone = remainder["REFERENCE TO".len()..].trim_start().to_string();
-            let flat = Self::peel(&mut remainder_clone)?;
-            *remainder = remainder_clone;
+        } else if let Ok(s) = Self::peel_string(code) {
+            Ok(s)
+        } else if let Ok(code_stripped) = code.strip_prefix_uppercase("REFERENCE TO") {
+            let mut code_clone = code_stripped.trim_start();
+            let flat = Self::peel(&mut code_clone)?;
+            *code = code_clone;
             Ok(Self::ReferenceTo(Box::new(flat)))
-        } else if remainder.to_uppercase().starts_with("POINTER TO") {
-            let mut remainder_clone = remainder["POINTER TO".len()..].trim_start().to_string();
-            let flat = Self::peel(&mut remainder_clone)?;
-            *remainder = remainder_clone;
+        } else if let Ok(code_stripped) = code.strip_prefix_uppercase("POINTER TO") {
+            let mut code_clone = code_stripped.trim_start();
+            let flat = Self::peel(&mut code_clone)?;
+            *code = code_clone;
             Ok(Self::PointerTo(Box::new(flat)))
-        } else if let Ok(implicit_enum) = Self::peel_implicit_enum(remainder) {
+        } else if let Ok(implicit_enum) = Self::peel_implicit_enum(code) {
             Ok(implicit_enum)
         } else {
             let mut data_type = String::new();
-            for c in remainder.chars() {
+            for c in code.chars() {
                 if c.is_alphanumeric() || c == '_' || c == '#' || c == '.' {
                     data_type.push(c);
                 } else {
@@ -114,114 +83,91 @@ impl DataType {
             if data_type.is_empty() {
                 Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("No Data Type\n{remainder}"),
+                    format!("No Data Type\n{code}"),
                 ))
             } else {
-                *remainder = remainder[data_type.len()..].to_string();
+                code.peel(data_type.len())?;
                 Ok(Self::Flat(data_type))
             }
         }
     }
 
-    fn peel_array(remainder: &mut String) -> Result<Self> {
-        if remainder.to_uppercase().starts_with("ARRAY") {
-            let start = match remainder.find('[') {
-                Some(i) => i,
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Cannot find '[' \n{remainder}"),
-                    ))
-                }
-            };
-            if remainder.len() <= start {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Finishes at '['\n{remainder}"),
-                ));
-            }
-            let end = match remainder[(start + 1)..].find(']') {
-                Some(i) => i + start + 1,
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Cannot find ']' \n{remainder}"),
-                    ))
-                }
-            };
-            if remainder.len() <= end {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Finishes at \"]\"\n{remainder}"),
-                ));
-            }
-            let of = match remainder[(end + 1)..].to_uppercase().find("OF") {
-                Some(i) => i + end + 1,
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Cannot find \"OF\" \n{remainder}"),
-                    ))
-                }
-            };
+    fn peel_array(code: &mut Code) -> Result<Self> {
+        let mut code_clone = code.strip_prefix_uppercase("ARRAY")?.trim_start();
 
-            let range = if let Some(mid) = remainder[(start + 1)..end].find("..") {
-                ArrayRange::LowerUpper(
-                    remainder[(start + 1)..(start + 1 + mid)].trim().to_string(),
-                    remainder[(start + 1 + mid + "..".len())..end]
-                        .trim()
-                        .to_string(),
-                )
-            } else if remainder[(start + 1)..end].trim() == "*" {
-                ArrayRange::Star
-            } else {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Cannot find array range \n{remainder}"),
-                ));
-            };
-
-            let mut remainder_clone = remainder[of + "OF".len()..].trim_start().to_string();
-            let flat = Self::peel(&mut remainder_clone)?;
-            *remainder = remainder_clone;
-            Ok(Self::Array(range, Box::new(flat)))
+        let range_string = code_clone.strip_between_and_trim_inner("[", "]")?;
+        let range = if range_string == "*" {
+            ArrayRange::Star
         } else {
-            Err(Error::new(
-                ErrorKind::InvalidData,
-                format!("Does not start with \"ARRAY\"\n{remainder}"),
-            ))
+            match range_string.split_once("..") {
+                Some((start, end)) => {
+                    ArrayRange::LowerUpper(start.trim().to_string(), end.trim().to_string())
+                }
+                None => {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        format!("Cannot parse array range\n{code}"),
+                    ))
+                }
+            }
+        };
+
+        code_clone = code_clone
+            .trim_start()
+            .strip_prefix_uppercase("OF")?
+            .trim_start();
+
+        let flat = Self::peel(&mut code_clone)?;
+
+        *code = code_clone;
+        Ok(Self::Array(range, Box::new(flat)))
+    }
+
+    fn peel_string(code: &mut Code) -> Result<Self> {
+        let code_clone = code.strip_prefix_uppercase("STRING")?;
+        let mut code_clone_clone = code_clone.trim_start();
+        match code_clone_clone.strip_between_and_trim_inner("(", ")") {
+            Ok(inner) => {
+                let length = match u16::from_str(&inner) {
+                    Ok(i) => i,
+                    Err(_) => {
+                        return Err(Error::new(
+                            ErrorKind::InvalidData,
+                            format!("Cannot parse STRING length\n{code}"),
+                        ))
+                    }
+                };
+                *code = code_clone_clone;
+                Ok(Self::String(Some(length)))
+            }
+            Err(_) => {
+                *code = code_clone;
+                Ok(Self::String(None))
+            }
         }
     }
 
-    fn peel_implicit_enum(remainder: &mut String) -> Result<Self> {
-        if !remainder.starts_with('(') {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Does not start with '('\n{remainder}",
-            ));
-        }
-        let mut remainder_clone = remainder[1..].trim_start().to_string();
+    fn peel_implicit_enum(code: &mut Code) -> Result<Self> {
+        let mut code_clone = code.strip_prefix('(')?.trim_start();
         let mut members = Vec::new();
         loop {
-            let identifier = Identifier::peel(&mut remainder_clone)?;
-            if let Some(remainder_clone_stripped) = remainder_clone.trim_start().strip_prefix(',') {
-                remainder_clone = remainder_clone_stripped.trim_start().to_string();
+            let identifier = Identifier::peel(&mut code_clone)?;
+            if let Ok(code_clone_stripped) = code_clone.trim_start().strip_prefix(',') {
+                code_clone = code_clone_stripped.trim_start();
                 members.push(identifier);
                 continue;
-            } else if let Some(remainder_clone_stripped) =
-                remainder_clone.trim_start().strip_prefix(')')
-            {
-                remainder_clone = remainder_clone_stripped.to_string();
+            } else if let Ok(code_clone_stripped) = code_clone.trim_start().strip_prefix(')') {
+                code_clone = code_clone_stripped;
                 members.push(identifier);
                 break;
             } else {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("Cannot parse Implicit Enum \n{remainder}"),
+                    format!("Cannot parse Implicit Enum \n{code}"),
                 ));
             }
         }
-        *remainder = remainder_clone.to_string();
+        *code = code_clone;
         Ok(Self::ImplicitEnum(members))
     }
 }
