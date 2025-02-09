@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn array() {
-    let mut input = String::from("[0, 4, SOME_CONSTANT, -2]");
+    let mut input = Code::from("[0, 4, SOME_CONSTANT, -2]");
     assert_eq!(
         Value::peel(&mut input).unwrap(),
         Value(ValueInner::Array(Array(
@@ -31,9 +31,9 @@ fn array() {
 
 #[test]
 fn array_and_array_accessor() {
-    let mut input_output = String::from("[0, 4, SOME_ARRAY[pp], -2, x[3]]");
+    let input_output = "[0, 4, SOME_ARRAY[pp], -2, x[3]]";
     assert_eq!(
-        Value::peel(&mut input_output).unwrap(),
+        Value::peel(&mut Code::from(input_output)).unwrap(),
         Value(ValueInner::Array(Array(
             vec![],
             vec![
@@ -62,25 +62,27 @@ fn array_and_array_accessor() {
     );
 
     let mut dazzler = dazzle::Dazzler::default();
-    Value::peel(&mut input_output).unwrap().dazzle(&mut dazzler);
-    assert_eq!(dazzler.f, input_output);
+    Value::peel(&mut Code::from(input_output))
+        .unwrap()
+        .dazzle(&mut dazzler);
+    assert_eq!(dazzler.f, String::from(input_output));
 }
 
 #[test]
 fn array_of_strings() {
-    let mut input = String::from("['hello', 'world!']");
+    let mut input = Code::from("['hello', 'world!']");
     assert!(Value::peel(&mut input).is_ok());
 }
 
 #[test]
 fn array_of_subidentifiers() {
-    let mut input = String::from("[item.value0, item.value1, item.value2]");
+    let mut input = Code::from("[item.value0, item.value1, item.value2]");
     assert!(Value::peel(&mut input).is_ok());
 }
 
 #[test]
-fn structure() {
-    let mut input = String::from("(this := [A, B, C_D], that := 12.3)");
+fn structure_simple() {
+    let mut input = Code::from("(this := [A, B, C_D], that := 12.3)");
     assert_eq!(
         Value(ValueInner::Struct(Struct(vec![
             (
@@ -116,13 +118,13 @@ fn structure() {
 
 #[test]
 fn structure_with_array_of_one_dimension() {
-    let mut input = String::from("(blah := 0.1, bleb := [x])");
+    let mut input = Code::from("(blah := 0.1, bleb := [x])");
     assert!(Value::peel(&mut input).is_ok());
 }
 
 #[test]
 fn structure_with_comments() {
-    let mut input = String::from(
+    let mut input = Code::from(
         "(
     zeroth := 0.0, // zeroth
     first := 1.0, // first
@@ -149,7 +151,7 @@ fn structure_with_comments() {
 
 #[test]
 fn structure_very_long() {
-    let mut input = String::from("(abc := 'abc', then_a_number := 123, xyz := 'xyz', then_a_constant := MY_CONSTANT, nested_struct := (a := 0, b := 1), keep_it_up := [0, 1, 2], dont_stop_me_now := 'Im having such a good time')");
+    let mut input = Code::from("(abc := 'abc', then_a_number := 123, xyz := 'xyz', then_a_constant := MY_CONSTANT, nested_struct := (a := 0, b := 1), keep_it_up := [0, 1, 2], dont_stop_me_now := 'Im having such a good time')");
     let output = String::from(
         "    (
         abc              := 'abc',
@@ -169,18 +171,16 @@ fn structure_very_long() {
 
 #[test]
 fn string() {
-    let mut input = String::from("'Trees!';");
+    let mut input = Code::from("'Trees!';");
     assert_eq!(
         Value(ValueInner::String(String::from("Trees!"))),
         Value::peel(&mut input).unwrap(),
     );
-    assert_eq!(input, String::from(";"));
 }
 
 #[test]
 fn string_with_escapes() {
-    let mut input =
-        String::from("'Let$'s escape! We shall be $$free$$ like the wind in the trees.'");
+    let mut input = Code::from("'Let$'s escape! We shall be $$free$$ like the wind in the trees.'");
     assert_eq!(
         Value(ValueInner::String(String::from(
             "Let's escape! We shall be $free$ like the wind in the trees."
@@ -191,10 +191,9 @@ fn string_with_escapes() {
 
 #[test]
 fn flat() {
-    let mut input = String::from("3.14;");
+    let mut input = Code::from("3.14;");
     assert_eq!(
         Value(ValueInner::Flat(String::from("3.14"))),
         Value::peel(&mut input).unwrap(),
     );
-    assert_eq!(input, String::from(";"));
 }

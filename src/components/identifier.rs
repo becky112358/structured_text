@@ -1,6 +1,8 @@
 use std::fmt;
 use std::io::{Error, ErrorKind, Result};
 
+use crate::code::Code;
+
 #[derive(Debug, PartialEq)]
 pub struct Identifier(pub String);
 
@@ -20,22 +22,22 @@ impl fmt::Display for IdentifierSub {
 }
 
 impl Identifier {
-    pub fn peel(remainder: &mut String) -> Result<Self> {
-        Ok(Self(peel(remainder, |c| c.is_alphanumeric() || c == '_')?))
+    pub fn peel(code: &mut Code) -> Result<Self> {
+        Ok(Self(peel(code, |c| c.is_alphanumeric() || c == '_')?))
     }
 }
 
 impl IdentifierSub {
-    pub fn peel(remainder: &mut String) -> Result<Self> {
-        Ok(Self(peel(remainder, |c| {
+    pub fn peel(code: &mut Code) -> Result<Self> {
+        Ok(Self(peel(code, |c| {
             c.is_alphanumeric() || c == '_' || c == '.'
         })?))
     }
 }
 
-fn peel(remainder: &mut String, char_allowed: impl Fn(char) -> bool) -> Result<String> {
+fn peel(code: &mut Code, char_allowed: impl Fn(char) -> bool) -> Result<String> {
     let mut output = String::new();
-    for c in remainder.chars() {
+    for c in code.chars() {
         if char_allowed(c) {
             output.push(c);
         } else {
@@ -45,10 +47,10 @@ fn peel(remainder: &mut String, char_allowed: impl Fn(char) -> bool) -> Result<S
     if output.is_empty() {
         Err(Error::new(
             ErrorKind::InvalidData,
-            format!("No identifer or sub-identifier \n{remainder}"),
+            format!("No identifer or sub-identifier \n{code}"),
         ))
     } else {
-        *remainder = remainder[output.len()..].to_string();
+        code.peel(output.len())?;
         Ok(output)
     }
 }
