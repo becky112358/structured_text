@@ -1,7 +1,7 @@
 use std::io::Result;
 use std::str::FromStr;
 
-use crate::components::{Component as C, Ether};
+use crate::components::{BeginMiddleEnd, Component as C, Ether};
 use crate::dazzle::{self, Dazzle, PreviousCharacter};
 use crate::declaration::Declaration;
 
@@ -79,7 +79,7 @@ fn trim_line_feeds(components: &mut Vec<C>, allow_multiple: bool) {
             | C::Address(_)
             | C::DataType(_)
             | C::Value(_)
-            | C::Assignment(_)
+            | C::Expression(_)
             | C::Filler(_) => {
                 line_feed_count = 0;
                 i += 1;
@@ -88,11 +88,11 @@ fn trim_line_feeds(components: &mut Vec<C>, allow_multiple: bool) {
                 trim_line_feeds(inners, false);
                 i += 1;
             }
-            C::BeginMiddleEnd(begin, middles, end) => {
+            C::BeginMiddleEnd(BeginMiddleEnd { begin, middle, end }) => {
                 trim_line_feeds(begin, false);
-                let n_middles = middles.len();
-                for (m, middle) in middles.iter_mut().enumerate() {
-                    trim_line_feeds(middle, m + 1 < n_middles);
+                let n_middles = middle.len();
+                for (im, m) in middle.iter_mut().enumerate() {
+                    trim_line_feeds(m, im + 1 < n_middles);
                 }
                 trim_line_feeds(end, allow_multiple);
                 i += 1;
@@ -150,7 +150,7 @@ fn extend_to_width(
             | C::IdentifierSub(_)
             | C::DataType(_)
             | C::Value(_)
-            | C::Assignment(_) => component.dazzle(dazzler),
+            | C::Expression(_) => component.dazzle(dazzler),
             C::Text(inner) => {
                 let text = inner.to_string();
                 component.dazzle(dazzler);
@@ -178,7 +178,7 @@ fn extend_to_width(
                 }
             }
             C::Address(_) => component.dazzle(dazzler),
-            C::BeginMiddleEnd(begin, middle, end) => {
+            C::BeginMiddleEnd(BeginMiddleEnd { begin, middle, end }) => {
                 for b in begin {
                     b.dazzle(dazzler);
                 }
@@ -199,55 +199,6 @@ fn extend_to_width(
             }
         }
         i += 1;
-    }
-}
-
-impl Dazzle for C {
-    fn dazzle(&self, arguments: &mut dazzle::Dazzler) {
-        match self {
-            C::Ether(inner) => inner.dazzle(arguments),
-            C::Space => match arguments.previous_character {
-                PreviousCharacter::Top
-                | PreviousCharacter::LineFeed
-                | PreviousCharacter::PendingSpace => (),
-                PreviousCharacter::Other => {
-                    arguments.previous_character = PreviousCharacter::PendingSpace
-                }
-            },
-            C::Uppercase(inner) => inner.dazzle(arguments),
-            C::Text(inner) => inner.dazzle(arguments),
-            C::Identifier(inner) => inner.dazzle(arguments),
-            C::IdentifierSub(inner) => inner.dazzle(arguments),
-            C::Address(inner) => inner.dazzle(arguments),
-            C::DataType(inner) => inner.dazzle(arguments),
-            C::Value(inner) => inner.dazzle(arguments),
-            C::Assignment(inner) => inner.dazzle(arguments),
-            C::BeginMiddleEnd(begin, middle, end) => {
-                for b in begin {
-                    b.dazzle(arguments);
-                }
-                arguments.indentation_count += 1;
-                for mi in middle {
-                    for m in mi {
-                        m.dazzle(arguments);
-                    }
-                }
-                arguments.indentation_count -= 1;
-                for e in end {
-                    e.dazzle(arguments);
-                }
-            }
-            C::Repeat(inners) => {
-                for inner in inners {
-                    inner.dazzle(arguments);
-                }
-            }
-            C::Filler(count) => {
-                for _ in 0..*count {
-                    arguments.f.push(' ');
-                }
-            }
-        }
     }
 }
 

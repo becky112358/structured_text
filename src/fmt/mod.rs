@@ -6,6 +6,7 @@ use std::str::FromStr;
 use super::{structured_text, visit_dirs};
 
 mod declaration;
+mod implementation;
 mod tab;
 mod trailing_whitespace;
 
@@ -23,7 +24,18 @@ fn fmt_file(path: &Path) -> Result<()> {
 
     structured_text.for_each_chunk(trailing_whitespace::trim_end)?;
     structured_text.for_each_chunk(tab::replace_with_whitespace)?;
-    structured_text.for_each_declaration(declaration::align)?;
+    if structured_text
+        .for_each_declaration(declaration::align)
+        .is_err()
+    {
+        println!("Failed to format {path:?} (declaration)");
+    }
+    if structured_text
+        .for_each_implementation(implementation::align)
+        .is_err()
+    {
+        println!("Failed to format {path:?} (implementation)");
+    }
 
     fs::write(path, structured_text.to_string())?;
 

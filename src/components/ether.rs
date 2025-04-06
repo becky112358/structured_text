@@ -27,12 +27,7 @@ impl Dazzle for Ether {
                 dazzler.previous_character = PreviousCharacter::LineFeed;
             }
             Self::PragmaOrComment(PragmaOrComment(PragmaOrCommentInner::Pragma(inner))) => {
-                match dazzler.previous_character {
-                    PreviousCharacter::Top | PreviousCharacter::LineFeed => (),
-                    PreviousCharacter::PendingSpace | PreviousCharacter::Other => {
-                        dazzler.f.push('\n')
-                    }
-                }
+                dazzler.if_not_linefeed_then_linefeed();
                 dazzler.f.push_str(&format!("{{{inner}}}"));
                 dazzler.previous_character = PreviousCharacter::Other;
             }
@@ -40,7 +35,11 @@ impl Dazzle for Ether {
                 inner,
             ))) => {
                 dazzler.indent_or_space(true);
-                dazzler.f.push_str(&format!("// {inner}"));
+                dazzler.f.push_str("//");
+                dazzler.previous_character = PreviousCharacter::PendingSpace;
+                if !inner.is_empty() {
+                    inner.dazzle(dazzler);
+                }
                 dazzler.previous_character = PreviousCharacter::LineFeed;
             }
             Self::PragmaOrComment(PragmaOrComment(PragmaOrCommentInner::CommentMultiLine(
@@ -69,10 +68,6 @@ impl Ether {
         *code = code_clone;
         Ok(pragmas_and_comments)
     }
-
-    pub fn then_comment(code: &Code) -> bool {
-        code.trim_start().starts_with_str("//") || code.trim_start().starts_with_str("(*")
-    }
 }
 
 fn peel_new_line(pragmas_and_comments: &mut Vec<Ether>, code: &mut Code) -> Result<()> {
@@ -93,14 +88,14 @@ fn peel_new_line(pragmas_and_comments: &mut Vec<Ether>, code: &mut Code) -> Resu
 }
 
 fn peel_single(pragmas_and_comments: &mut Vec<Ether>, code: &mut Code) -> Result<bool> {
-    if let Ok(pragma) = code.strip_between_and_trim_inner("{", "}") {
+    if let Ok(pragma) = code.strip_between_nestable_and_trim_inner("{", "}") {
         pragmas_and_comments.push(Ether::PragmaOrComment(PragmaOrComment(
             PragmaOrCommentInner::Pragma(pragma),
         )));
         return Ok(true);
     }
 
-    if let Ok(comment) = code.strip_between_and_trim_inner("(*", "*)") {
+    if let Ok(comment) = code.strip_between_nestable_and_trim_inner("(*", "*)") {
         pragmas_and_comments.push(Ether::PragmaOrComment(PragmaOrComment(
             PragmaOrCommentInner::CommentMultiLine(comment),
         )));
@@ -108,6 +103,12 @@ fn peel_single(pragmas_and_comments: &mut Vec<Ether>, code: &mut Code) -> Result
     }
 
     if let Ok(comment) = code.strip_between_and_trim_inner("//", "\n") {
+        pragmas_and_comments.push(Ether::PragmaOrComment(PragmaOrComment(
+            PragmaOrCommentInner::CommentSingleLine(comment),
+        )));
+        pragmas_and_comments.push(Ether::LineFeed);
+        return Ok(true);
+    } else if let Ok(comment) = code.strip_from_and_trim_inner("//") {
         pragmas_and_comments.push(Ether::PragmaOrComment(PragmaOrComment(
             PragmaOrCommentInner::CommentSingleLine(comment),
         )));

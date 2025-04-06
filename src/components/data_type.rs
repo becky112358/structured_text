@@ -59,13 +59,13 @@ impl DataType {
             Ok(array)
         } else if let Ok(s) = Self::peel_string(code) {
             Ok(s)
-        } else if let Ok(code_stripped) = code.strip_prefix_uppercase("REFERENCE TO") {
-            let mut code_clone = code_stripped.trim_start();
+        } else if let Ok(mut code_clone) = code.strip_prefix_uppercase("REFERENCE TO") {
+            code_clone = code_clone.trim_start();
             let flat = Self::peel(&mut code_clone)?;
             *code = code_clone;
             Ok(Self::ReferenceTo(Box::new(flat)))
-        } else if let Ok(code_stripped) = code.strip_prefix_uppercase("POINTER TO") {
-            let mut code_clone = code_stripped.trim_start();
+        } else if let Ok(mut code_clone) = code.strip_prefix_uppercase("POINTER TO") {
+            code_clone = code_clone.trim_start();
             let flat = Self::peel(&mut code_clone)?;
             *code = code_clone;
             Ok(Self::PointerTo(Box::new(flat)))
@@ -124,9 +124,8 @@ impl DataType {
     }
 
     fn peel_string(code: &mut Code) -> Result<Self> {
-        let code_clone = code.strip_prefix_uppercase("STRING")?;
-        let mut code_clone_clone = code_clone.trim_start();
-        match code_clone_clone.strip_between_and_trim_inner("(", ")") {
+        let mut code_clone = code.strip_prefix_uppercase("STRING")?.trim_start();
+        match code_clone.strip_between_and_trim_inner("(", ")") {
             Ok(inner) => {
                 let length = match u16::from_str(&inner) {
                     Ok(i) => i,
@@ -137,7 +136,7 @@ impl DataType {
                         ))
                     }
                 };
-                *code = code_clone_clone;
+                *code = code_clone;
                 Ok(Self::String(Some(length)))
             }
             Err(_) => {

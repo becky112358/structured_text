@@ -7,6 +7,7 @@ mod components;
 mod dazzle;
 mod declaration;
 mod fmt;
+mod implementation;
 mod layout;
 mod structured_text;
 

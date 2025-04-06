@@ -64,4 +64,30 @@ impl Dazzler {
         }
         self.previous_character = PreviousCharacter::Other;
     }
+
+    pub fn if_not_linefeed_then_linefeed(&mut self) {
+        match self.previous_character {
+            PreviousCharacter::Top | PreviousCharacter::LineFeed => (),
+            PreviousCharacter::PendingSpace | PreviousCharacter::Other => {
+                self.f.push('\n');
+                self.previous_character = PreviousCharacter::LineFeed;
+            }
+        }
+    }
+
+    pub fn should_split<T>(&self, t: &T, dazzle_singleline: fn(&T, &mut Dazzler)) -> bool {
+        let last_line = match self.f.lines().last() {
+            Some(line) => line.to_owned(),
+            None => self.f.clone(),
+        };
+        let mut dazzler = Dazzler {
+            f: last_line,
+            previous_character: self.previous_character.clone(),
+            indentation_count: self.indentation_count,
+        };
+
+        dazzle_singleline(t, &mut dazzler);
+
+        dazzler.f.contains('\n') || dazzler.f.len() > crate::fmt::LINE_LENGTH_LIMIT as usize
+    }
 }

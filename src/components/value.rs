@@ -3,7 +3,7 @@ use std::io::{Error, ErrorKind, Result};
 use crate::code::Code;
 use crate::dazzle::{self, Dazzle};
 
-use super::{Assignment, Ether, Identifier};
+use super::{Ether, Expression, Identifier, KEYWORDS};
 
 #[derive(Debug, PartialEq)]
 pub struct Value(ValueInner);
@@ -32,11 +32,7 @@ impl Dazzle for ValueInner {
                 dazzler.f.push_str(&format!("'{inner}'"));
                 dazzler.previous_character = dazzle::PreviousCharacter::Other;
             }
-            Self::Flat(inner) => {
-                dazzler.indent_or_space(false);
-                dazzler.f.push_str(&inner.to_string());
-                dazzler.previous_character = dazzle::PreviousCharacter::Other;
-            }
+            Self::Flat(inner) => inner.dazzle(dazzler),
         }
     }
 }
@@ -61,6 +57,7 @@ impl ValueInner {
                     break;
                 } else if !escape && c == '$' {
                     escape = true;
+                    value.push(c);
                 } else if escape {
                     escape = false;
                     value.push(c);
@@ -73,28 +70,28 @@ impl ValueInner {
             Ok(Self::String(value))
         } else {
             let mut value = String::new();
-            let mut array_accessor_count = 0;
             for c in code.chars() {
                 if c.is_alphanumeric() || c == '_' || c == '-' || c == '#' || c == '.' {
-                    value.push(c);
-                } else if c == '[' {
-                    array_accessor_count += 1;
-                    value.push(c);
-                } else if c == ']' && array_accessor_count > 0 {
-                    array_accessor_count -= 1;
                     value.push(c);
                 } else {
                     break;
                 }
             }
-            code.peel(value.len())?;
-            Ok(Self::Flat(value))
+            if value.is_empty() || KEYWORDS.contains(&value.to_uppercase().as_str()) {
+                Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("No value\n{code}"),
+                ))
+            } else {
+                code.peel(value.len())?;
+                Ok(Self::Flat(value))
+            }
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
-struct Array(Vec<Ether>, Vec<(Assignment, Vec<Ether>)>);
+struct Array(Vec<Ether>, Vec<(Expression, Vec<Ether>)>);
 
 impl Dazzle for Array {
     fn dazzle(&self, dazzler: &mut dazzle::Dazzler) {
@@ -135,7 +132,7 @@ impl Array {
 
         let mut array = Vec::new();
         loop {
-            let member = Assignment::peel(&mut code_clone, ',', ']')?;
+            let member = Expression::peel(&mut code_clone)?;
             let mut ethers = Ether::peel(&mut code_clone)?;
             if let Ok(code_clone_stripped) = code_clone.strip_prefix(',') {
                 code_clone = code_clone_stripped;
@@ -152,128 +149,92 @@ impl Array {
 }
 
 #[derive(Debug, PartialEq)]
-struct Struct(Vec<(Identifier, Assignment, Vec<Ether>)>);
+struct Struct(Vec<(Identifier, Expression, Vec<Ether>)>);
 
 impl Dazzle for Struct {
     fn dazzle(&self, dazzler: &mut dazzle::Dazzler) {
-        if self.dazzle_multiline(dazzler) {
-            match dazzler.previous_character {
-                dazzle::PreviousCharacter::Top | dazzle::PreviousCharacter::LineFeed => (),
-                dazzle::PreviousCharacter::PendingSpace | dazzle::PreviousCharacter::Other => {
-                    dazzler.f.push('\n');
-                    dazzler.previous_character = dazzle::PreviousCharacter::LineFeed;
-                }
-            }
-            dazzler.indentation_count += 1;
-            dazzler.indent();
-            dazzler.f.push_str("(\n");
-            dazzler.indentation_count += 1;
-            dazzler.previous_character = dazzle::PreviousCharacter::LineFeed;
-
-            let max_identifier_length = self
-                .0
-                .iter()
-                .map(|(i, _, _)| i.to_string().len())
-                .max()
-                .unwrap_or(0);
-
-            let width_to_comment_start = self.get_width_to_comment_start(max_identifier_length)
-                + dazzle::INDENT_WIDTH as usize * dazzler.indentation_count as usize;
-
-            for (i, (identifier, assignment, ethers)) in self.0.iter().enumerate() {
-                identifier.dazzle(dazzler);
-                for _ in 0..(max_identifier_length - identifier.to_string().len()) {
-                    dazzler.f.push(' ');
-                }
-                dazzler.f.push_str(" :=");
-                dazzler.previous_character = dazzle::PreviousCharacter::PendingSpace;
-                assignment.dazzle(dazzler);
-                if i + 1 < self.0.len() {
-                    dazzler.f.push(',');
-                    dazzler.previous_character = dazzle::PreviousCharacter::Other;
-                }
-                for (j, ether) in ethers.iter().enumerate() {
-                    if j == 0 && ether.is_comment() {
-                        let width_current = match dazzler.f.lines().last() {
-                            Some(line) => line.len(),
-                            None => dazzler.f.len(),
-                        };
-                        for _ in width_current..width_to_comment_start {
-                            dazzler.f.push(' ');
-                        }
-                    }
-                    ether.dazzle(dazzler);
-                }
-                if dazzler.previous_character != dazzle::PreviousCharacter::LineFeed {
-                    dazzler.f.push('\n');
-                    dazzler.previous_character = dazzle::PreviousCharacter::LineFeed;
-                }
-            }
-            dazzler.indentation_count -= 1;
-            dazzler.indent();
-            dazzler.f.push(')');
-            dazzler.indentation_count -= 1;
-            dazzler.previous_character = dazzle::PreviousCharacter::Other;
+        if dazzler.should_split(self, dazzle_singleline) {
+            self.dazzle_multiline(dazzler);
         } else {
-            dazzler.indent_or_space(false);
-            dazzler.f.push('(');
-            dazzler.previous_character = dazzle::PreviousCharacter::Other;
-            for (i, (identifier, value, ethers)) in self.0.iter().enumerate() {
-                identifier.dazzle(dazzler);
-                dazzler.f.push_str(" :=");
-                dazzler.previous_character = dazzle::PreviousCharacter::PendingSpace;
-                value.dazzle(dazzler);
-                for ether in ethers {
-                    ether.dazzle(dazzler);
-                }
-                if i + 1 < self.0.len() {
-                    dazzler.f.push(',');
-                }
-                dazzler.previous_character = dazzle::PreviousCharacter::PendingSpace;
-            }
-            dazzler.f.push(')');
-            dazzler.previous_character = dazzle::PreviousCharacter::Other;
+            dazzle_singleline(self, dazzler);
         }
     }
 }
 
-impl Struct {
-    fn dazzle_multiline(&self, dazzler: &dazzle::Dazzler) -> bool {
-        if dazzler.previous_character == dazzle::PreviousCharacter::LineFeed {
-            return true;
-        }
-
-        let last_line = match dazzler.f.lines().last() {
-            Some(line) => line.to_owned(),
-            None => dazzler.f.clone(),
-        };
-        let mut dazzler_this = dazzle::Dazzler {
-            f: last_line,
-            previous_character: dazzle::PreviousCharacter::Other, // '('
-            indentation_count: dazzler.indentation_count,
-        };
-
-        for (identifier, assignment, ethers) in &self.0 {
-            identifier.dazzle(&mut dazzler_this);
-            dazzler_this.previous_character = dazzle::PreviousCharacter::PendingSpace; // ' := '
-            assignment.dazzle(&mut dazzler_this);
-            dazzler_this.previous_character = dazzle::PreviousCharacter::Other; // ','
+fn dazzle_singleline(s: &Struct, dazzler: &mut dazzle::Dazzler) {
+    '('.dazzle(dazzler);
+    for (i, (identifier, value, ethers)) in s.0.iter().enumerate() {
+        identifier.dazzle(dazzler);
+        dazzler.f.push_str(" :=");
+        dazzler.previous_character = dazzle::PreviousCharacter::PendingSpace;
+        value.dazzle(dazzler);
+        if !&ethers.iter().all(|ether| *ether == Ether::LineFeed) {
             for ether in ethers {
-                ether.dazzle(&mut dazzler_this);
-            }
-
-            if dazzler_this.f.contains('\n') {
-                return true;
+                ether.dazzle(dazzler);
             }
         }
+        if i + 1 < s.0.len() {
+            dazzler.f.push(',');
+            dazzler.previous_character = dazzle::PreviousCharacter::PendingSpace;
+        }
+    }
+    ')'.dazzle(dazzler);
+}
 
-        let length = dazzler_this.f.len() + "()".len() + self.0.len() * " := ,".len();
-        length > crate::fmt::LINE_LENGTH_LIMIT as usize
+impl Struct {
+    fn dazzle_multiline(&self, dazzler: &mut dazzle::Dazzler) {
+        dazzler.indentation_count += 1;
+        dazzler.if_not_linefeed_then_linefeed();
+        dazzler.indent();
+        dazzler.f.push_str("(\n");
+        dazzler.indentation_count += 1;
+        dazzler.previous_character = dazzle::PreviousCharacter::LineFeed;
+
+        let max_identifier_length = self
+            .0
+            .iter()
+            .map(|(i, _, _)| i.to_string().len())
+            .max()
+            .unwrap_or(0);
+
+        let width_to_comment_start = self.get_width_to_comment_start(max_identifier_length)
+            + dazzle::INDENT_WIDTH as usize * dazzler.indentation_count as usize;
+
+        for (i, (identifier, expression, ethers)) in self.0.iter().enumerate() {
+            identifier.dazzle(dazzler);
+            for _ in 0..(max_identifier_length - identifier.to_string().len()) {
+                dazzler.f.push(' ');
+            }
+            dazzler.f.push_str(" :=");
+            dazzler.previous_character = dazzle::PreviousCharacter::PendingSpace;
+            expression.dazzle(dazzler);
+            if i + 1 < self.0.len() {
+                ','.dazzle(dazzler);
+            }
+            for (j, ether) in ethers.iter().enumerate() {
+                if j == 0 && ether.is_comment() {
+                    let width_current = match dazzler.f.lines().last() {
+                        Some(line) => line.len(),
+                        None => dazzler.f.len(),
+                    };
+                    for _ in width_current..width_to_comment_start {
+                        dazzler.f.push(' ');
+                    }
+                }
+                ether.dazzle(dazzler);
+            }
+            dazzler.if_not_linefeed_then_linefeed();
+        }
+        dazzler.indentation_count -= 1;
+        dazzler.indent();
+        dazzler.f.push(')');
+        dazzler.indentation_count -= 1;
+        dazzler.previous_character = dazzle::PreviousCharacter::Other;
     }
 
     fn get_width_to_comment_start(&self, max_identifier_length: usize) -> usize {
         let mut max_width = 0;
-        for (i, (_, assignment, ethers)) in self.0.iter().enumerate() {
+        for (i, (_, expression, ethers)) in self.0.iter().enumerate() {
             match ethers.first() {
                 Some(ether) => {
                     if !ether.is_comment() {
@@ -287,7 +248,7 @@ impl Struct {
                 previous_character: dazzle::PreviousCharacter::LineFeed,
                 indentation_count: 0,
             };
-            assignment.dazzle(&mut dazzler_line);
+            expression.dazzle(&mut dazzler_line);
             let mut this_width = match dazzler_line.f.rsplit_once('\n') {
                 Some((_, last_line)) => last_line.len(),
                 None => dazzler_line.f.len() + max_identifier_length + " := ".len(),
@@ -306,17 +267,17 @@ impl Struct {
         loop {
             let identifier = Identifier::peel(&mut code_clone)?;
             code_clone = code_clone.trim_start().strip_prefix_str(":=")?.trim_start();
-            let assignment = Assignment::peel(&mut code_clone, ',', ')')?;
+            let expression = Expression::peel(&mut code_clone)?;
             let mut ethers = Ether::peel(&mut code_clone)?;
-            if let Ok(code_clone_stripped) = code_clone.trim_start().strip_prefix(',') {
+            if let Ok(code_clone_stripped) = code_clone.strip_prefix(',') {
                 code_clone = code_clone_stripped;
                 ethers.extend(Ether::peel(&mut code_clone)?);
-                values.push((identifier, assignment, ethers));
+                values.push((identifier, expression, ethers));
                 continue;
-            } else if let Ok(code_clone_stripped) = code_clone.trim_start().strip_prefix(')') {
+            } else if let Ok(code_clone_stripped) = code_clone.strip_prefix(')') {
                 code_clone = code_clone_stripped;
                 ethers.extend(Ether::peel(&mut code_clone)?);
-                values.push((identifier, assignment, ethers));
+                values.push((identifier, expression, ethers));
                 break;
             } else {
                 return Err(Error::new(

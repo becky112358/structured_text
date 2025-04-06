@@ -238,12 +238,25 @@ impl File {
         self.declaration = declaration;
         for chunk in self.chunks.iter_mut() {
             match chunk.what {
-                Content::Declaration => (),
+                Content::Declaration => {
+                    let content = cb(&chunk.content)?;
+                    chunk.content = content;
+                }
                 Content::Implementation => continue,
             }
+        }
+        Ok(())
+    }
 
-            let content = cb(&chunk.content)?;
-            chunk.content = content;
+    pub fn for_each_implementation(&mut self, cb: fn(&str) -> Result<String>) -> Result<()> {
+        for chunk in self.chunks.iter_mut() {
+            match chunk.what {
+                Content::Declaration => continue,
+                Content::Implementation => {
+                    let content = cb(&chunk.content)?;
+                    chunk.content = content;
+                }
+            }
         }
         Ok(())
     }

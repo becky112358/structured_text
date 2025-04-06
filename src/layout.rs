@@ -2,17 +2,21 @@ use std::io::{Error, ErrorKind, Result};
 
 use crate::code::Code;
 use crate::components::{
-    Address, Assignment, Component as C, DataType, Ether, Identifier, IdentifierSub, Value,
+    Address, BeginMiddleEnd, Component as C, DataType, Ether, Expression, Identifier,
+    IdentifierSub, Value,
 };
+use crate::implementation;
 
 pub fn string_and_format_get_items(code: &mut Code, layout: &[Layout]) -> Result<Vec<C>> {
     let mut output = Vec::new();
+    let mut code_clone = code.clone();
 
     for l in layout {
-        let items = string_and_one_format_get_items(code, l)?;
+        let items = string_and_one_format_get_items(&mut code_clone, l)?;
         output.extend(items);
     }
 
+    *code = code_clone;
     Ok(output)
 }
 
@@ -43,9 +47,7 @@ fn string_and_one_format_get_items(code: &mut Code, layout: &Layout) -> Result<V
         Layout::Address => output.push(C::Address(Address::peel(&mut code_clone)?)),
         Layout::DataType => output.push(C::DataType(DataType::peel(&mut code_clone)?)),
         Layout::Value => output.push(C::Value(Value::peel(&mut code_clone)?)),
-        Layout::Assignment => {
-            output.push(C::Assignment(Assignment::peel(&mut code_clone, ';', ';')?))
-        }
+        Layout::Expression => output.push(C::Expression(Expression::peel(&mut code_clone)?)),
         Layout::OneOf(options) => {
             let mut found = false;
             for option in *options {
@@ -72,55 +74,14 @@ fn string_and_one_format_get_items(code: &mut Code, layout: &Layout) -> Result<V
             }
         }
         Layout::BeginMiddleEnd(beginf, middlef, endf) => {
-            let mut begind = string_and_format_get_items(&mut code_clone, beginf)?;
-
-            let mut middled_start_ethers = Vec::new();
-            let mut new_line = false;
-            for ether in Ether::peel(&mut code_clone)? {
-                if !new_line {
-                    begind.push(C::Ether(ether.clone()));
-                } else {
-                    middled_start_ethers.push(C::Ether(ether.clone()));
-                }
-                if matches!(ether, Ether::LineFeed) {
-                    new_line = true;
-                }
-            }
-            if !matches!(begind.last(), Some(C::Ether(Ether::LineFeed))) {
-                begind.push(C::Ether(Ether::LineFeed));
-            }
-
-            let mut middled = vec![middled_start_ethers];
-            let mut code_clone_clone = code_clone.clone();
-            while let Ok(mut items) = string_and_format_get_items(&mut code_clone_clone, middlef) {
-                for ether in Ether::peel(&mut code_clone_clone)? {
-                    items.push(C::Ether(ether));
-                }
-                if !matches!(items.last(), Some(C::Ether(Ether::LineFeed))) {
-                    items.push(C::Ether(Ether::LineFeed));
-                }
-                middled.push(items);
-                code_clone = code_clone_clone.clone();
-            }
-
-            let mut endd = string_and_format_get_items(&mut code_clone, endf)?;
-            let mut output_after_ethers = Vec::new();
-            let mut new_line = false;
-            for ether in Ether::peel(&mut code_clone)? {
-                if !new_line {
-                    endd.push(C::Ether(ether.clone()));
-                } else {
-                    output_after_ethers.push(C::Ether(ether.clone()));
-                }
-                if matches!(ether, Ether::LineFeed) {
-                    new_line = true;
-                }
-            }
-            if !matches!(endd.last(), Some(C::Ether(Ether::LineFeed))) {
-                endd.push(C::Ether(Ether::LineFeed));
-            }
-            output.push(C::BeginMiddleEnd(begind, middled, endd));
-            output.extend(output_after_ethers);
+            let (begin_middle_end, ethers) = BeginMiddleEnd::peel(
+                &mut code_clone,
+                |c| string_and_format_get_items(c, beginf),
+                |c| string_and_format_get_items(c, middlef),
+                |c| string_and_format_get_items(c, endf),
+            )?;
+            output.push(C::BeginMiddleEnd(begin_middle_end));
+            output.extend(ethers.into_iter().map(C::Ether).collect::<Vec<C>>());
         }
         Layout::Repeat(inner) => {
             let mut found = false;
@@ -134,6 +95,7 @@ fn string_and_one_format_get_items(code: &mut Code, layout: &Layout) -> Result<V
                 return Ok(Vec::new());
             }
         }
+        Layout::Implementation => output.extend(implementation::peel(&mut code_clone)?),
     }
 
     *code = code_clone;
@@ -152,11 +114,12 @@ pub enum Layout {
     Address,
     DataType,
     Value,
-    Assignment,
+    Expression,
     OneOf(&'static [&'static [Layout]]),
     Option(&'static [Layout]),
     BeginMiddleEnd(&'static [Layout], &'static [Layout], &'static [Layout]),
     Repeat(&'static [Layout]),
+    Implementation,
 }
 
 fn peel<'a>(code: &mut Code, text: &'a str) -> Result<&'a str> {

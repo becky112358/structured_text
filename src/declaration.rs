@@ -66,7 +66,7 @@ const VARIABLE_DECLARATION: &[L] = &[L::OneOf(&[
         L::Text(":"),
         L::Space,
         L::DataType,
-        L::Option(&[L::Space, L::Text(":="), L::Space, L::Assignment]),
+        L::Option(&[L::Space, L::Text(":="), L::Space, L::Expression]),
         L::Text(";"),
     ],
     &[L::Text(";")],

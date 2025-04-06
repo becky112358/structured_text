@@ -39,15 +39,24 @@ impl<'a> Code<'a> {
         }
     }
 
-    pub fn starts_with(&self, c: char) -> bool {
-        self.content[self.cursor..].starts_with(c)
-    }
-
-    pub fn starts_with_str(&self, text: &str) -> bool {
-        self.content[self.cursor..].starts_with(text)
-    }
-
     pub fn strip_between_and_trim_inner(&mut self, start: &str, end: &str) -> Result<String> {
+        self.strip_between_and_trim_inner_common(start, end, false)
+    }
+
+    pub fn strip_between_nestable_and_trim_inner(
+        &mut self,
+        start: &str,
+        end: &str,
+    ) -> Result<String> {
+        self.strip_between_and_trim_inner_common(start, end, true)
+    }
+
+    fn strip_between_and_trim_inner_common(
+        &mut self,
+        start: &str,
+        end: &str,
+        nestable: bool,
+    ) -> Result<String> {
         if !self.content[self.cursor..].starts_with(start) {
             return Err(Error::new(
                 ErrorKind::InvalidData,
@@ -55,20 +64,51 @@ impl<'a> Code<'a> {
             ));
         }
 
-        let index_end = match self.content[self.cursor + start.len()..].find(end) {
-            Some(ie) => ie,
-            None => {
-                return Err(Error::new(
+        let mut index_end = self.cursor
+            + start.len()
+            + self.content[self.cursor + start.len()..]
+                .find(end)
+                .ok_or(Error::new(
                     ErrorKind::InvalidData,
                     format!("Cannot find {end}\n{self}"),
-                ))
-            }
-        };
+                ))?;
 
-        let inner = self.content[self.cursor + start.len()..self.cursor + start.len() + index_end]
+        if nestable {
+            let mut index_start_inner = self.cursor;
+            while let Some(inner_inner) =
+                self.content[index_start_inner + start.len()..index_end].find(start)
+            {
+                index_end = index_end
+                    + end.len()
+                    + self.content[index_end + end.len()..]
+                        .find(end)
+                        .ok_or(Error::new(
+                            ErrorKind::InvalidData,
+                            format!("Cannot find {end}\n{self}"),
+                        ))?;
+                index_start_inner = index_start_inner + start.len() + inner_inner;
+            }
+        }
+
+        let inner = self.content[self.cursor + start.len()..index_end]
             .trim()
             .to_string();
-        self.cursor += start.len() + index_end + end.len();
+        self.cursor = index_end + end.len();
+        Ok(inner)
+    }
+
+    pub fn strip_from_and_trim_inner(&mut self, start: &str) -> Result<String> {
+        if !self.content[self.cursor..].starts_with(start) {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("Does not start with {start}\n{self}"),
+            ));
+        }
+
+        let inner = self.content[self.cursor + start.len()..self.content.len()]
+            .trim()
+            .to_string();
+        self.cursor = self.content.len();
         Ok(inner)
     }
 
@@ -112,14 +152,17 @@ impl<'a> Code<'a> {
     }
 
     pub fn trim_start(&self) -> Self {
-        let mut output = self.to_owned();
+        let mut cursor = self.cursor;
         for c in self.content[self.cursor..].chars() {
             if c.is_whitespace() {
-                output.cursor += c.len_utf8();
+                cursor += c.len_utf8();
             } else {
                 break;
             }
         }
-        output
+        Self {
+            content: self.content,
+            cursor,
+        }
     }
 }
