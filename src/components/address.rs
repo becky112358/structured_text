@@ -22,8 +22,7 @@ impl fmt::Display for Address {
 
 impl Address {
     pub fn peel(code: &mut Code) -> Result<Self> {
-        let mut code_clone = code.strip_prefix_uppercase("AT")?;
-        code_clone = code_clone.trim_start();
+        let mut code_clone = code.strip_prefix_uppercase("AT")?.trim_start();
         code_clone = code_clone.strip_prefix('%')?;
 
         let address = match code_clone.chars().next() {

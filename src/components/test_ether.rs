@@ -19,3 +19,14 @@ fn top() {
 
     assert_eq!(dazzler.f, output);
 }
+
+#[test]
+fn nested_comment() {
+    let mut input = Code::from("(* Hello! (* I am a nested comment! *) Goodbye! *)");
+
+    let output = Ether::peel(&mut input);
+
+    assert!(output.is_ok());
+
+    assert!(input.end_of_file());
+}

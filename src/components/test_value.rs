@@ -8,22 +8,13 @@ fn array() {
         Value(ValueInner::Array(Array(
             vec![],
             vec![
+                (Expression::peel(&mut Code::from("0")).unwrap(), vec![]),
+                (Expression::peel(&mut Code::from("4")).unwrap(), vec![]),
                 (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("0")))),
+                    Expression::peel(&mut Code::from("SOME_CONSTANT")).unwrap(),
                     vec![]
                 ),
-                (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("4")))),
-                    vec![]
-                ),
-                (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("SOME_CONSTANT")))),
-                    vec![]
-                ),
-                (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("-2")))),
-                    vec![]
-                ),
+                (Expression::peel(&mut Code::from("-2")).unwrap(), vec![]),
             ]
         ))),
     );
@@ -37,26 +28,14 @@ fn array_and_array_accessor() {
         Value(ValueInner::Array(Array(
             vec![],
             vec![
+                (Expression::peel(&mut Code::from("0")).unwrap(), vec![]),
+                (Expression::peel(&mut Code::from("4")).unwrap(), vec![]),
                 (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("0")))),
+                    Expression::peel(&mut Code::from("SOME_ARRAY[pp]")).unwrap(),
                     vec![]
                 ),
-                (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("4")))),
-                    vec![]
-                ),
-                (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("SOME_ARRAY[pp]")))),
-                    vec![]
-                ),
-                (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("-2")))),
-                    vec![]
-                ),
-                (
-                    Assignment::Value(Value(ValueInner::Flat(String::from("x[3]")))),
-                    vec![]
-                ),
+                (Expression::peel(&mut Code::from("-2")).unwrap(), vec![]),
+                (Expression::peel(&mut Code::from("x[3]")).unwrap(), vec![]),
             ]
         ))),
     );
@@ -87,28 +66,12 @@ fn structure_simple() {
         Value(ValueInner::Struct(Struct(vec![
             (
                 Identifier(String::from("this")),
-                Assignment::Value(Value(ValueInner::Array(Array(
-                    vec![],
-                    vec![
-                        (
-                            Assignment::Value(Value(ValueInner::Flat(String::from("A")))),
-                            vec![]
-                        ),
-                        (
-                            Assignment::Value(Value(ValueInner::Flat(String::from("B")))),
-                            vec![]
-                        ),
-                        (
-                            Assignment::Value(Value(ValueInner::Flat(String::from("C_D")))),
-                            vec![]
-                        ),
-                    ]
-                )))),
+                Expression::peel(&mut Code::from("[A, B, C_D]")).unwrap(),
                 vec![],
             ),
             (
                 Identifier(String::from("that")),
-                Assignment::Value(Value(ValueInner::Flat(String::from("12.3")))),
+                Expression::peel(&mut Code::from("12.3")).unwrap(),
                 vec![],
             ),
         ]))),
@@ -183,7 +146,7 @@ fn string_with_escapes() {
     let mut input = Code::from("'Let$'s escape! We shall be $$free$$ like the wind in the trees.'");
     assert_eq!(
         Value(ValueInner::String(String::from(
-            "Let's escape! We shall be $free$ like the wind in the trees."
+            "Let$'s escape! We shall be $$free$$ like the wind in the trees."
         ))),
         Value::peel(&mut input).unwrap(),
     );
